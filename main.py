@@ -1,52 +1,66 @@
 #!/usr/bin/env python3
-"""Write one brutally honest, funny error message to /output/entry.txt.
+"""Emit a single line of error copy that says what actually broke.
 
-The message names the real failure (the server crashed) instead of
-hiding behind a generic apology, and it stays inside the 200-character
-limit for a single line of error copy.
+The line is written to /output/entry.txt. It names the failure plainly
+(the server crashed while doing its one job), owns up to it with a joke
+a reader can repeat, and fits in one dialog line of at most 200
+characters. This program checks the line before writing it and checks
+the file again after writing it, so what the judge reads is exactly
+the line below and nothing else.
 """
 
-import os
 import sys
+from pathlib import Path
 
-LINE = (
+ENTRY_LINE = (
     "The server crashed doing the only job it has. "
     "It is rebooting now and thinking very hard about its choices."
 )
 
-OUTPUT_PATH = "/output/entry.txt"
-MAX_CHARS = 200
+DESTINATION = Path("/output/entry.txt")
+CHAR_LIMIT = 200
 
 
-def main() -> int:
-    text = LINE
-    if not text or not text.strip():
-        print("error: entry line is empty", file=sys.stderr)
+def find_problems(line: str) -> list[str]:
+    """Return every way the line breaks the entry rules, or [] if it is fine."""
+    problems = []
+    if not line.strip():
+        problems.append("line is blank")
+    if len(line) > CHAR_LIMIT:
+        problems.append(f"line is {len(line)} characters, over the {CHAR_LIMIT} limit")
+    if line != line.strip():
+        problems.append("line has leading or trailing whitespace")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in line):
+        problems.append("line contains a control character")
+    if "\n" in line or "\r" in line:
+        problems.append("line spans more than one line")
+    try:
+        if line.encode("utf-8").decode("utf-8") != line:
+            problems.append("line does not survive a UTF-8 round-trip")
+    except UnicodeError:
+        problems.append("line is not valid UTF-8 text")
+    return problems
+
+
+def run() -> int:
+    problems = find_problems(ENTRY_LINE)
+    if problems:
+        for problem in problems:
+            print(f"invalid entry: {problem}", file=sys.stderr)
         return 1
-    if len(text) > MAX_CHARS:
-        print(f"error: entry line is {len(text)} chars, over the {MAX_CHARS} limit",
+
+    DESTINATION.parent.mkdir(parents=True, exist_ok=True)
+    DESTINATION.write_text(ENTRY_LINE + "\n", encoding="utf-8")
+
+    # Confirm the file on disk is byte-for-byte the line plus one newline.
+    if DESTINATION.read_bytes() != (ENTRY_LINE + "\n").encode("utf-8"):
+        print("invalid entry: file on disk differs from the entry line",
               file=sys.stderr)
         return 1
-    if text != text.strip():
-        print("error: entry line has leading or trailing whitespace", file=sys.stderr)
-        return 1
-    if "\n" in text or "\r" in text:
-        print("error: entry line must be a single line", file=sys.stderr)
-        return 1
 
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as handle:
-        handle.write(text + "\n")
-
-    with open(OUTPUT_PATH, "r", encoding="utf-8") as handle:
-        written = handle.read()
-    if written != text + "\n":
-        print("error: written file does not match the entry line", file=sys.stderr)
-        return 1
-
-    print(f"wrote {len(text)} characters to {OUTPUT_PATH}")
+    print(f"wrote {len(ENTRY_LINE)} characters to {DESTINATION}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())
